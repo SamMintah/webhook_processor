@@ -101,18 +101,6 @@ sequenceDiagram
 ├── README.md
 
 ```
-
-## Implementation Notes
-
-### Singleton Queue Pattern
-
-The application uses a singleton pattern for the queue implementation:
-
-- `src/services/queue.js` exports a single shared queue instance
-- Both the HTTP routes and worker pool import and use this same instance
-- This ensures consistent backpressure behavior across the application
-- When the queue reaches capacity, new webhook requests are rejected with a 429 status code
-
 ## Prerequisites
 
 - Node.js (v14 or higher)
