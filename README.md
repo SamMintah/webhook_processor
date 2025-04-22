@@ -124,8 +124,8 @@ The application uses a singleton pattern for the queue implementation:
 Clone the repository and install dependencies:
 
 ```bash
-git clone <repository-url>
-cd monterosa
+git clone [<repository-url>](https://github.com/SamMintah/webhook_processor/)
+cd webhook_processor
 npm install
 ```
 
