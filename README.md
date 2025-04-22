@@ -18,17 +18,19 @@ A scalable webhook processing service built with Node.js and Express. This servi
 
 The service follows a queue-based architecture:
 1. **HTTP Server**: Receives webhook events via POST requests
-2. **Validation Layer**: Ensures payloads match expected schema
-3. **Queue**: In-memory FIFO queue with configurable size limits
-4. **Worker Pool**: Configurable concurrency for processing webhooks
-5. **Rate Limiting**: Queue-based backpressure mechanism
-6. **Retry Logic**: Failed webhooks are retried with configurable delay
-7. **Metrics**: Prometheus-compatible metrics for monitoring
+2. **HTTP-level rate limiting**: In-memory request threshold (429 on overload)
+3. **Validation Layer**: Ensures payloads match expected schema
+4. **Queue**: In-memory FIFO queue with configurable size limits
+5. **Worker Pool**: Configurable concurrency for processing webhooks
+6. **Queue overload protection**: Backpressure via bounded FIFO queue
+7. **Retry Logic**: Failed webhooks are retried with configurable delay
+8. **Metrics**: Prometheus-compatible metrics for monitoring
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant Server as HTTP Server
+    participant RateLimiter
     participant Validation
     participant Queue
     participant Worker
@@ -37,7 +39,12 @@ sequenceDiagram
     participant Prometheus
     
     Client->>Server: POST /webhook
-    Server->>Validation: Validate JSON payload
+    Server->>RateLimiter: check request count
+    alt below threshold
+        RateLimiter->>Validation: pass through
+    else above threshold
+        RateLimiter-->>Client: 429 Too Many Requests
+    end
     Validation->>Queue: Add to FIFO queue
     Server-->>Client: 202 Accepted
     Queue->>Worker: Dequeue when worker available
@@ -50,7 +57,8 @@ sequenceDiagram
 ## Features
 
 - Configurable concurrency for webhook processing
-- Queue-based rate limiting with overload protection
+- HTTP-level rate limiting: in-memory request threshold (429 on overload)
+- Queue overload protection: backpressure via bounded FIFO queue
 - Comprehensive metrics for monitoring and alerting
 - Structured JSON logging for better observability
 - Graceful shutdown handling for zero downtime deployments
@@ -71,7 +79,7 @@ sequenceDiagram
 │   │   ├── metrics.js
 │   │   └── health.js
 │   ├── services/
-│   │   ├── queue.js
+│   │   ├── queue.js      
 │   │   ├── processor.js
 │   │   └── workerPool.js
 │   └── utils/
@@ -94,6 +102,17 @@ sequenceDiagram
 ├── README.md
 
 ```
+
+## Implementation Notes
+
+### Singleton Queue Pattern
+
+The application uses a singleton pattern for the queue implementation:
+
+- `src/services/queue.js` exports a single shared queue instance
+- Both the HTTP routes and worker pool import and use this same instance
+- This ensures consistent backpressure behavior across the application
+- When the queue reaches capacity, new webhook requests are rejected with a 429 status code
 
 ## Prerequisites
 
@@ -196,30 +215,208 @@ curl http://localhost:3000/metrics
 ```
 # HELP process_cpu_user_seconds_total Total user CPU time spent in seconds.
 # TYPE process_cpu_user_seconds_total counter
-process_cpu_user_seconds_total 0.029376
+process_cpu_user_seconds_total 6.3391
 
-# HELP webhook_received_total Total number of webhooks received
-# TYPE webhook_received_total counter
-webhook_received_total 42
+# HELP process_cpu_system_seconds_total Total system CPU time spent in seconds.
+# TYPE process_cpu_system_seconds_total counter
+process_cpu_system_seconds_total 1.015978
 
-# HELP webhook_processing_duration_seconds Webhook processing time in seconds
-# TYPE webhook_processing_duration_seconds histogram
-webhook_processing_duration_seconds_bucket{le="0.1"} 5
-webhook_processing_duration_seconds_bucket{le="0.5"} 18
-webhook_processing_duration_seconds_bucket{le="1"} 35
-webhook_processing_duration_seconds_bucket{le="2"} 40
-webhook_processing_duration_seconds_bucket{le="5"} 42
-webhook_processing_duration_seconds_bucket{le="+Inf"} 42
-webhook_processing_duration_seconds_sum 29.12
-webhook_processing_duration_seconds_count 42
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 7.355078
 
-# HELP queue_size Current number of items in the queue
-# TYPE queue_size gauge
-queue_size 3
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1745277103
 
-# HELP queue_processing Current number of items being processed
-# TYPE queue_processing gauge
-queue_processing 2
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 65175552
+
+# HELP nodejs_eventloop_lag_seconds Lag of event loop in seconds.
+# TYPE nodejs_eventloop_lag_seconds gauge
+nodejs_eventloop_lag_seconds 0
+
+# HELP nodejs_eventloop_lag_min_seconds The minimum recorded event loop delay.
+# TYPE nodejs_eventloop_lag_min_seconds gauge
+nodejs_eventloop_lag_min_seconds 0.008593408
+
+# HELP nodejs_eventloop_lag_max_seconds The maximum recorded event loop delay.
+# TYPE nodejs_eventloop_lag_max_seconds gauge
+nodejs_eventloop_lag_max_seconds 0.117702655
+
+# HELP nodejs_eventloop_lag_mean_seconds The mean of the recorded event loop delays.
+# TYPE nodejs_eventloop_lag_mean_seconds gauge
+nodejs_eventloop_lag_mean_seconds 0.01099094367336187
+
+# HELP nodejs_eventloop_lag_stddev_seconds The standard deviation of the recorded event loop delays.
+# TYPE nodejs_eventloop_lag_stddev_seconds gauge
+nodejs_eventloop_lag_stddev_seconds 0.00592045845358732
+
+# HELP nodejs_eventloop_lag_p50_seconds The 50th percentile of the recorded event loop delays.
+# TYPE nodejs_eventloop_lag_p50_seconds gauge
+nodejs_eventloop_lag_p50_seconds 0.010387455
+
+# HELP nodejs_eventloop_lag_p90_seconds The 90th percentile of the recorded event loop delays.
+# TYPE nodejs_eventloop_lag_p90_seconds gauge
+nodejs_eventloop_lag_p90_seconds 0.011263999
+
+# HELP nodejs_eventloop_lag_p99_seconds The 99th percentile of the recorded event loop delays.
+# TYPE nodejs_eventloop_lag_p99_seconds gauge
+nodejs_eventloop_lag_p99_seconds 0.017661951
+
+# HELP nodejs_active_resources Number of active resources that are currently keeping the event loop alive, grouped by async resource type.
+# TYPE nodejs_active_resources gauge
+nodejs_active_resources{type="TTYWrap"} 2
+nodejs_active_resources{type="TCPServerWrap"} 1
+nodejs_active_resources{type="TCPSocketWrap"} 1
+nodejs_active_resources{type="Immediate"} 1
+
+# HELP nodejs_active_resources_total Total number of active resources.
+# TYPE nodejs_active_resources_total gauge
+nodejs_active_resources_total 5
+
+# HELP nodejs_active_handles Number of active libuv handles grouped by handle type. Every handle type is C++ class name.
+# TYPE nodejs_active_handles gauge
+nodejs_active_handles{type="WriteStream"} 2
+nodejs_active_handles{type="Server"} 1
+nodejs_active_handles{type="Socket"} 1
+
+# HELP nodejs_active_handles_total Total number of active handles.
+# TYPE nodejs_active_handles_total gauge
+nodejs_active_handles_total 4
+
+# HELP nodejs_active_requests Number of active libuv requests grouped by request type. Every request type is C++ class name.
+# TYPE nodejs_active_requests gauge
+
+# HELP nodejs_active_requests_total Total number of active requests.
+# TYPE nodejs_active_requests_total gauge
+nodejs_active_requests_total 0
+
+# HELP nodejs_heap_size_total_bytes Process heap size from Node.js in bytes.
+# TYPE nodejs_heap_size_total_bytes gauge
+nodejs_heap_size_total_bytes 10711040
+
+# HELP nodejs_heap_size_used_bytes Process heap size used from Node.js in bytes.
+# TYPE nodejs_heap_size_used_bytes gauge
+nodejs_heap_size_used_bytes 9651040
+
+# HELP nodejs_external_memory_bytes Node.js external memory size in bytes.
+# TYPE nodejs_external_memory_bytes gauge
+nodejs_external_memory_bytes 2575049
+
+# HELP nodejs_heap_space_size_total_bytes Process heap space size total from Node.js in bytes.
+# TYPE nodejs_heap_space_size_total_bytes gauge
+nodejs_heap_space_size_total_bytes{space="read_only"} 0
+nodejs_heap_space_size_total_bytes{space="new"} 1048576
+nodejs_heap_space_size_total_bytes{space="old"} 8081408
+nodejs_heap_space_size_total_bytes{space="code"} 1310720
+nodejs_heap_space_size_total_bytes{space="shared"} 0
+nodejs_heap_space_size_total_bytes{space="new_large_object"} 0
+nodejs_heap_space_size_total_bytes{space="large_object"} 270336
+nodejs_heap_space_size_total_bytes{space="code_large_object"} 0
+nodejs_heap_space_size_total_bytes{space="shared_large_object"} 0
+
+# HELP nodejs_heap_space_size_used_bytes Process heap space size used from Node.js in bytes.
+# TYPE nodejs_heap_space_size_used_bytes gauge
+nodejs_heap_space_size_used_bytes{space="read_only"} 0
+nodejs_heap_space_size_used_bytes{space="new"} 390680
+nodejs_heap_space_size_used_bytes{space="old"} 7845896
+nodejs_heap_space_size_used_bytes{space="code"} 1161152
+nodejs_heap_space_size_used_bytes{space="shared"} 0
+nodejs_heap_space_size_used_bytes{space="new_large_object"} 0
+nodejs_heap_space_size_used_bytes{space="large_object"} 262160
+nodejs_heap_space_size_used_bytes{space="code_large_object"} 0
+nodejs_heap_space_size_used_bytes{space="shared_large_object"} 0
+
+# HELP nodejs_heap_space_size_available_bytes Process heap space size available from Node.js in bytes.
+# TYPE nodejs_heap_space_size_available_bytes gauge
+nodejs_heap_space_size_available_bytes{space="read_only"} 0
+nodejs_heap_space_size_available_bytes{space="new"} 640200
+nodejs_heap_space_size_available_bytes{space="old"} 94656
+nodejs_heap_space_size_available_bytes{space="code"} 0
+nodejs_heap_space_size_available_bytes{space="shared"} 0
+nodejs_heap_space_size_available_bytes{space="new_large_object"} 1048576
+nodejs_heap_space_size_available_bytes{space="large_object"} 0
+nodejs_heap_space_size_available_bytes{space="code_large_object"} 0
+nodejs_heap_space_size_available_bytes{space="shared_large_object"} 0
+
+# HELP nodejs_version_info Node.js version info.
+# TYPE nodejs_version_info gauge
+nodejs_version_info{version="v20.17.0",major="20",minor="17",patch="0"} 1
+
+# HELP nodejs_gc_duration_seconds Garbage collection duration by kind, one of major, minor, incremental or weakcb.
+# TYPE nodejs_gc_duration_seconds histogram
+nodejs_gc_duration_seconds_bucket{le="0.001",kind="minor"} 0
+nodejs_gc_duration_seconds_bucket{le="0.01",kind="minor"} 19
+nodejs_gc_duration_seconds_bucket{le="0.1",kind="minor"} 19
+nodejs_gc_duration_seconds_bucket{le="1",kind="minor"} 19
+nodejs_gc_duration_seconds_bucket{le="2",kind="minor"} 19
+nodejs_gc_duration_seconds_bucket{le="5",kind="minor"} 19
+nodejs_gc_duration_seconds_bucket{le="+Inf",kind="minor"} 19
+nodejs_gc_duration_seconds_sum{kind="minor"} 0.0537080210149288
+nodejs_gc_duration_seconds_count{kind="minor"} 19
+nodejs_gc_duration_seconds_bucket{le="0.001",kind="incremental"} 8
+nodejs_gc_duration_seconds_bucket{le="0.01",kind="incremental"} 8
+nodejs_gc_duration_seconds_bucket{le="0.1",kind="incremental"} 8
+nodejs_gc_duration_seconds_bucket{le="1",kind="incremental"} 8
+nodejs_gc_duration_seconds_bucket{le="2",kind="incremental"} 8
+nodejs_gc_duration_seconds_bucket{le="5",kind="incremental"} 8
+nodejs_gc_duration_seconds_bucket{le="+Inf",kind="incremental"} 8
+nodejs_gc_duration_seconds_sum{kind="incremental"} 0.004048804000020027
+nodejs_gc_duration_seconds_count{kind="incremental"} 8
+nodejs_gc_duration_seconds_bucket{le="0.001",kind="major"} 0
+nodejs_gc_duration_seconds_bucket{le="0.01",kind="major"} 7
+nodejs_gc_duration_seconds_bucket{le="0.1",kind="major"} 8
+nodejs_gc_duration_seconds_bucket{le="1",kind="major"} 8
+nodejs_gc_duration_seconds_bucket{le="2",kind="major"} 8
+nodejs_gc_duration_seconds_bucket{le="5",kind="major"} 8
+nodejs_gc_duration_seconds_bucket{le="+Inf",kind="major"} 8
+nodejs_gc_duration_seconds_sum{kind="major"} 0.03212324298918247
+nodejs_gc_duration_seconds_count{kind="major"} 8
+
+# HELP webhook_total_received Total number of webhook requests received
+# TYPE webhook_total_received counter
+webhook_total_received 3212
+
+# HELP webhook_total_processed Total number of webhook requests successfully processed
+# TYPE webhook_total_processed counter
+webhook_total_processed 1209
+
+# HELP webhook_too_many_requests Total number of webhook requests rejected due to queue overload
+# TYPE webhook_too_many_requests counter
+webhook_too_many_requests 1988
+
+# HELP webhook_queue_length Current length of the webhook processing queue
+# TYPE webhook_queue_length gauge
+webhook_queue_length 9
+
+# HELP webhook_processing_time_ms Webhook processing time in milliseconds
+# TYPE webhook_processing_time_ms histogram
+webhook_processing_time_ms_bucket{le="10"} 0
+webhook_processing_time_ms_bucket{le="50"} 0
+webhook_processing_time_ms_bucket{le="100"} 7
+webhook_processing_time_ms_bucket{le="200"} 514
+webhook_processing_time_ms_bucket{le="500"} 1198
+webhook_processing_time_ms_bucket{le="1000"} 1209
+webhook_processing_time_ms_bucket{le="2000"} 1209
+webhook_processing_time_ms_bucket{le="5000"} 1209
+webhook_processing_time_ms_bucket{le="+Inf"} 1209
+webhook_processing_time_ms_sum 271348
+webhook_processing_time_ms_count 1209
+
+# HELP webhook_queue_time_ms Time items spend in the queue in ms
+# TYPE webhook_queue_time_ms histogram
+webhook_queue_time_ms_bucket{le="10"} 10
+webhook_queue_time_ms_bucket{le="50"} 10
+webhook_queue_time_ms_bucket{le="100"} 10
+webhook_queue_time_ms_bucket{le="200"} 17
+webhook_queue_time_ms_bucket{le="500"} 39
+webhook_queue_time_ms_bucket{le="1000"} 83
+webhook_queue_time_ms_bucket{le="+Inf"} 1224
+webhook_queue_time_ms_sum 2327855
+webhook_queue_time_ms_count 1224
+
 ```
 
 ### GET /health
@@ -432,23 +629,16 @@ The service uses an in-memory queue to decouple webhook reception from processin
 The worker pool model with configurable concurrency allows the service to be tuned for different workloads and hardware. This provides a balance between maximizing throughput and preventing system overload.
 
 ### Rate Limiting Strategy
-Rather than using a traditional rate limiter, the service implements backpressure through queue size limits. When the queue reaches the configured threshold, new requests are rejected with a 429 status code, encouraging clients to implement exponential backoff.
+The service implements two layers of rate limiting:
+1. **HTTP-level rate limiting**: An in-memory counter tracks incoming request rates and rejects requests with 429 status code when the threshold is exceeded.
+2. **Queue-based backpressure**: When the queue reaches the configured threshold, new requests are rejected with a 429 status code, encouraging clients to implement exponential backoff.
+
+This dual approach provides protection at both the HTTP server level and the processing queue level.
 
 ### Retry Logic
 Failed webhook processing is automatically retried with configurable delays and maximum attempts. This improves reliability without requiring clients to implement their own retry logic.
 
 ### Observability
 The service prioritizes observability through structured logging, detailed metrics, and a health check endpoint. This makes it easier to monitor, troubleshoot, and optimize in production environments.
-
-## Future Improvements
-
-- **Persistence**: Add optional persistence for the queue to prevent data loss during restarts
-- **Authentication**: Implement webhook signature verification for security
-- **Distributed Processing**: Scale beyond a single instance using a distributed queue
-- **Advanced Monitoring**: Add alerting based on queue size and processing latency
-- **Circuit Breaker**: Implement circuit breaker pattern for downstream service calls
-- **Webhook Batching**: Allow processing multiple webhooks in a single batch for efficiency
-- **Dynamic Configuration**: Support runtime configuration changes without restart
-- **Priority Queue**: Implement priority levels for different webhook types
 
 ---

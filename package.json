@@ -1,0 +1,40 @@
+{
+  "name": "webhook-processor",
+  "version": "1.0.0",
+  "description": "High-throughput webhook processor with configurable concurrency and metrics",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --config jest.config.mjs",
+    "load-test": "node load-test.js",
+     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "pino": "^8.14.1",
+    "pino-http": "^8.3.3",
+    "prom-client": "^14.2.0"
+  },
+  "devDependencies": {
+    "jest": "^29.5.0",
+    "nodemon": "^2.0.22",
+    "pino-pretty": "^10.3.1",
+    "supertest": "^6.3.3"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "keywords": [
+    "webhook",
+    "queue",
+    "processor",
+    "express",
+    "metrics"
+  ],
+  "author": "",
+  "license": "MIT"
+}
