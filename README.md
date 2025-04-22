@@ -12,7 +12,6 @@ A scalable webhook processing service built with Node.js and Express. This servi
 - Prometheus client (metrics)
 - Jest & Supertest (testing)
 - Dotenv (configuration)
-- CORS
 
 ## System Architecture
 
